@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cognito User Pool JS Example</title>
+
+    <!-- Bootstrap - Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"
+        integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+    <link rel="icon" type="image/png" href="images/favicon-16x16.png" sizes="16x16">
+    <link rel="icon" type="image/png" href="images/favicon-32x32.png" sizes="32x32">
+</head>
+
+<body>
+    <!-- Hidden inputs for User Pool ID and Client ID -->
+    <input type="hidden" id="userPoolId" value="us-east-1_XqotfSoiz">
+    <input type="hidden" id="clientId" value="42kiqgg8cpcnek362157td482r">
+
+    <!-- 
+    Navigation Bar 
+-->
+    <nav class="navbar navbar-inverse">
+        <div class="container-fluid">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="#">Juan Lozano Dog Recognition</a>
+            </div>
+            <ul class="nav navbar-nav navbar-right">
+            </ul>
+        </div>
+    </nav>
+
+    <!-- 
+    User Info
+ -->
+    <div class="container" id="usersHeader">
+        <div id="status" style="text-align: center; margin-top: 20px; color: green; font-size: 20px;"></div>
+        <div class="btn-toolbar" role="toolbar">
+            <div class="dropdown">
+                <button class="btn btn-secondary dropdown-toggle" type="button" data-toggle="dropdown">Action
+                    <span class="caret"></span></button>
+                <ul class="dropdown-menu">
+                    <li><a href="#" onclick="actionAddUser();return false;"> Add User</a></li>
+                    <li><a href="#" onclick="actionConfirmUser();return false;">Confirm User</a></li>
+                    <li><a href="#" onclick="actionSignInUser();return false;">Sign In</a></li>
+                    <li><a href="#" onclick="actionSignOutUser();return false;">Sign Out</a></li>
+                    <li><a href="#" onclick="actionChangePassword();return false;">Change Password</a></li>
+                    <li><a href="#" onclick="actionForgotPassword();return false;">Forgot Password</a></li>
+                    <li><a href="#" onclick="actionDeleteUser();return false;">Delete User</a></li>
+                </ul>
+            </div>
+        </div>
+        <!-- 
+    Alerts
+ -->
+        <div class="alert alert-danger" id="operationAlert" hidden>
+            <button type="button" class="close" onclick="closeAlertMessage()">&times;</button>
+            <span></span>
+        </div>
+
+        <!-- Display Kinesis Stream Data -->
+        <div id="kinesisData" style="margin-top: 20px;"></div>
+
+        <!-- Chart Section -->
+        <h3>Barrels per Second Data Chart</h3>
+        <div id="plotlyChart"></div>
+    </div> <!-- /container -->
+
+    <!-- Bootstrap's JavaScript dependencies -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"
+        integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa"
+        crossorigin="anonymous"></script>
+
+    <!-- AWS SDK script -->
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1316.0.min.js"></script>
+
+    <!-- Cognito User Pool related code -->
+    <script type="text/javascript" src="js/amazon-cognito-identity.min.js"></script>
+    <script type="text/javascript" src="js/authentication.js"></script>
+    <script type="text/javascript" src="js/user-interface.js"></script>
+
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <script>
+        // Initialize AWS configuration
+        AWS.config.region = 'us-east-1'; // Update with your region
+        AWS.config.credentials = new AWS.CognitoIdentityCredentials({
+            IdentityPoolId: 'us-east-1:549828d7-1f7b-46a6-a334-c836891e160c', // Update with your Identity Pool ID
+        });
+
+        // Create a new Kinesis object
+        var kinesis = new AWS.Kinesis();
+
+        // Function to read data from Kinesis and update the chart using Plotly.js
+        function readKinesisData() {
+            var xData = []; // Array to store timestamp values
+            var yData = []; // Array to store barrels per second values
+
+            var params = {
+                ShardIteratorType: 'LATEST',
+                ShardId: 'shardId-000000000000', // Update with your shard ID
+                StreamName: 'SensorDataStream' // Update with your Kinesis stream name
+            };
+
+            kinesis.getShardIterator(params, function (err, data) {
+                if (err) {
+                    console.error('Error getting shard iterator: ', err);
+                } else {
+                    var shardIterator = data.ShardIterator;
+
+                    // Continuously read data from the Kinesis stream
+                    setInterval(function () {
+                        kinesis.getRecords({
+                            ShardIterator: shardIterator,
+                            Limit: 10
+                        }, function (err, data) {
+                            if (err) {
+                                console.error('Error reading data from stream: ', err);
+                            } else {
+                                data.Records.forEach(function (record) {
+                                    // Parse the record data
+                                    var jsonData = JSON.parse(record.Data.toString());
+                                    var timestamp = new Date(jsonData.timestamp * 1000); // Convert UNIX timestamp to JavaScript timestamp
+                                    var value = jsonData.data.barrels_per_second;
+
+                                    // Add the data to arrays
+                                    xData.push(timestamp);
+                                    yData.push(value);
+
+                                    // Limit xData and yData arrays to keep only the last 5 values
+                                    if (xData.length > 5) {
+                                        xData = xData.slice(-5);
+                                        yData = yData.slice(-5);
+                                    }
+
+                                    // Update the Plotly.js chart with new data
+                                    Plotly.newPlot('plotlyChart', [{
+                                        x: xData,
+                                        y: yData,
+                                        type: 'scatter',
+                                        mode: 'lines+markers',
+                                        name: 'Barrels per Second'
+                                    }], {
+                                        title: 'Barrels per Second Data',
+                                        xaxis: {
+                                            title: 'Timestamp'
+                                        },
+                                        yaxis: {
+                                            title: 'Barrels per Second'
+                                        }
+                                    });
+                                });
+
+                                // Update shard iterator for the next iteration
+                                shardIterator = data.NextShardIterator;
+                            }
+                        });
+                    }, 2000); // Adjust the interval as needed
+                }
+            });
+        }
+
+        // Call the function to read Kinesis data
+        readKinesisData();
+    </script>
+</body>
+
+</html>
